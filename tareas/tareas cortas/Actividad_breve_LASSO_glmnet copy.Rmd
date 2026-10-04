@@ -1,0 +1,139 @@
+# Actividad breve: regresión LASSO con `glmnet`
+
+**Nombre:**
+
+**Tiempo:** 15 minutos  
+**Modalidad:** individual  
+**Entrega:** este notebook ejecutado, con las respuestas escritas en las celdas indicadas.
+
+## Objetivo
+
+Al finalizar esta actividad podrás ajustar una regresión LASSO, elegir el parámetro de penalización mediante validación cruzada e interpretar la selección de variables.
+
+> **Importante:** ejecuta las celdas en orden y reemplaza únicamente los espacios marcados con `_____`.
+
+## Contexto
+
+Trabajaremos con los datos `mtcars`. La variable respuesta es `mpg`, que mide el rendimiento del automóvil en millas por galón. Usaremos las demás variables para explicar o predecir `mpg`.
+
+LASSO agrega una penalización a los coeficientes. A medida que aumenta la penalización, algunos coeficientes pueden quedar exactamente en cero.
+
+```{r}
+# Instalar glmnet solo si no está disponible
+# if (!requireNamespace("glmnet", quietly = TRUE)) {
+#  install.packages("glmnet")
+#}
+
+library(glmnet)
+
+data(mtcars)
+
+# Variable respuesta
+y <- mtcars$mpg
+
+# glmnet requiere que los predictores estén en una matriz
+X <- model.matrix(mpg ~ ., data = mtcars)[, -1]
+
+dim(X)
+head(X)
+```
+
+## 1. Ajustar el modelo LASSO — 1 punto
+
+En `glmnet`, complete el valor de `alpha` para ajustar LASSO.
+
+**Respuesta 1.** El valor utilizado fue `alpha = 1` porque corresponde a la penalización L1 de Lasso.
+```{r}
+set.seed(123)
+
+modelo_lasso <- cv.glmnet(
+  x = X,
+  y = y,
+  alpha = 1
+)
+
+plot(modelo_lasso)
+```
+```{r}
+set.seed(123)
+
+grilla_lambda <- 10^seq(2, -3, length.out = 100) # lambda grid
+
+modelo2_lasso <- cv.glmnet(
+  x            = X,
+  y            = y,
+  alpha        = 1,            
+  lambda       = grilla_lambda, # grid 
+  nfolds       = 10,            # 10 folds
+  type.measure = "mse"
+)
+
+plot(modelo_lasso)
+
+lambda_optimo_grid <- modelo2_lasso$lambda.min
+lambda_optimo_grid
+```
+
+## 2. Elegir el valor de $\lambda$ — 1 punto
+
+`cv.glmnet()` evalúa distintos valores de $\lambda$ mediante validación cruzada. Extraiga el valor que entrega el menor error promedio.
+
+**Respuesta 2.** El valor obtenido para el óptimo fue $\lambda = 0.8007036$.
+```{r}
+lambda_optimo <- modelo_lasso$lambda.min
+lambda_1se <- modelo_lasso$lambda.1se
+
+lambda_optimo
+lambda_1se
+```
+```{r}
+mean((y - predict(modelo_lasso, X, s = "lambda.min"))^2)
+mean((y - predict(modelo_lasso, X, s = "lambda.1se"))^2)
+mean((y - predict(modelo2_lasso, X, s = "lambda.min"))^2)
+
+```
+
+
+## 3. Identificar las variables seleccionadas — 2 puntos
+
+Obtenga los coeficientes asociados a `lambda.min`. Luego identifique los predictores cuyo coeficiente es distinto de cero. **No incluya el intercepto en su lista.**
+
+**Respuesta 3.** Las variables seleccionadas fueron 3 de 10: "cyl", "hp", "wt".
+```{r}
+coeficientes <- as.matrix(
+  coef(modelo_lasso, s =lambda_optimo)
+)
+
+coeficientes
+coeficientes!=0
+```
+
+## 4. Interpretar el resultado — 2 puntos
+
+Responda en un máximo de 500 caracteres
+
+**Respuesta 4.** ¿Qué significa que una variable tenga coeficiente igual a cero en el modelo LASSO ajustado?
+
+Significa que el modelo decidió eliminar esta variable del modelo.
+
+---
+### Si termina antes (opcional, sin puntaje)
+
+Repita la lista de variables usando `s = "lambda.1se"`. ¿Se seleccionan más o menos variables que con `lambda.min`? Relacione su respuesta con el tamaño de la penalización.
+
+Respuesta 4: Las variables que "se salvan" son las mismas que antes ("cyl", "hp", "wt"), pero sus valores son mayores.
+```{r}
+coeficientes <- as.matrix(
+  coef(modelo_lasso, s =lambda_1se)
+)
+
+coeficientes
+coeficientes!=0
+```
+```{r}
+coef_min <- as.matrix(coef(modelo_lasso, s = modelo_lasso$lambda.min))
+coef_1se <- as.matrix(coef(modelo_lasso, s = modelo_lasso$lambda.1se))
+
+coef_1se / coef_min
+```
+

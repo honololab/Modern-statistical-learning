@@ -1,0 +1,12 @@
+# Ignore everything at the top level...
+/*
+
+# ...except the tareas folder and this file
+!/tareas/
+!/.gitignore
+
+# Junk files, even inside tareas
+.DS_Store
+.RData
+.Rhistory
+.zip
