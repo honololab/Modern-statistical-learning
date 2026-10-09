@@ -234,9 +234,58 @@ mostrar("DIAG2 (causa externa)", diag2)
 mostrar("Casos anonimizados", anonimizados)
 options(op)
 
+# ---------------------------------------------------------------------------
+# 5. Media vs. varianza de los conteos
+#    Conteo = casos por región y año. Para cada región se calcula la media y
+#    la varianza entre años. Bajo Poisson varianza = media (línea diagonal);
+#    puntos sobre la línea indican sobredispersión. Se excluyen 2012 (sin
+#    registros de A28 en la fuente) y los casos sin región. Son conteos brutos,
+#    sin offset de población.
+# ---------------------------------------------------------------------------
+conteos_reg <- as.matrix(region_anio[rownames(region_anio) != "(sin dato)",
+                                     setdiff(colnames(region_anio), "2012")])
+media_var <- data.frame(region   = rownames(conteos_reg),
+                        media    = rowMeans(conteos_reg),
+                        varianza = apply(conteos_reg, 1, var),
+                        row.names = NULL)
+media_var$razon <- round(media_var$varianza / media_var$media, 2)
+
+# Devianza residual de un Poisson con media constante por región (sin
+# covariables ni offset): D = 2 * sum(y * log(y / media)), con 0 * log(0) = 0.
+# Bajo Poisson D ~ chi-cuadrado con (años - 1) g.l., así que D / g.l. ~ 1.
+gl <- ncol(conteos_reg) - 1
+media_var$devianza <- round(apply(conteos_reg, 1, function(y) {
+  m <- mean(y)
+  2 * sum(ifelse(y > 0, y * log(y / m), 0) - (y - m))
+}), 2)
+media_var$dev_gl  <- round(media_var$devianza / gl, 2)
+media_var$p_valor <- signif(pchisq(media_var$devianza, gl, lower.tail = FALSE), 2)
+
+media_var <- media_var[order(-media_var$media), ]
+rownames(media_var) <- NULL
+
+mostrar(paste0("Media, varianza y devianza residual de casos por región entre años ",
+               "(razón = varianza / media; dev_gl = devianza / ", gl, " g.l.)"),
+        transform(media_var, media = round(media, 2), varianza = round(varianza, 2)))
+
+# Gráfico sobrio: sin caja, grilla gris clara, ejes en potencias de 10
+lim  <- range(c(media_var$media, media_var$varianza))
+pot  <- floor(log10(lim[1])):ceiling(log10(lim[2]))
+gris <- "grey35"; verde <- "#6B7F67"
+op_par <- par(mar = c(4.5, 4.5, 1, 1), col.axis = gris, col.lab = gris, las = 1)
+plot(NA, log = "xy", xlim = 10^range(pot), ylim = 10^range(pot), axes = FALSE,
+     xlab = "Media de casos por año (por región)", ylab = "Varianza de esos conteos")
+abline(v = 10^pot, h = 10^pot, col = "grey90")
+etiquetas <- parse(text = paste0("10^", pot))
+axis(1, 10^pot, etiquetas, lwd = 0); axis(2, 10^pot, etiquetas, lwd = 0)
+abline(0, 1, col = verde, lwd = 2)            # en escala log, y = x sigue siendo recta
+text(10^(max(pot) - 0.6), 10^(max(pot) - 1.1), "varianza = media", col = verde, cex = 0.85)
+points(media_var$media, media_var$varianza, pch = 19, col = adjustcolor("grey20", 0.7))
+par(op_par)
+
 cat("\nData frames disponibles:\n",
     " por_archivo, gato (un caso por fila), anonimizados, descr_columnas,\n",
     " casos_anio, anio_anonimizada, sexo_original, sexo, sexo_anio, edad_original,\n",
     " edad, edad_sexo, edad_anio, region_codigo, region, region_anio, region_sexo,\n",
     " region_edad, comuna, pais_origen, prevision, pertenencia, condicion_egreso,\n",
-    " dias_estada, diag2\n")
+    " dias_estada, diag2, media_var\n")
