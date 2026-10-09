@@ -11,9 +11,9 @@
 .Rhistory
 .zip
 .Rmd
-.rds
-.csv
-.pdf
+*.rds
+*.csv
+*.pdf
 tareas/poisson/colab_dataset_A281.R
 tareas/poisson/colab_dataset_A281.ipynb
 tareas/poisson/decisiones_dataset.Rmd
