@@ -11,6 +11,9 @@
 .Rhistory
 .zip
 .Rmd
+.rds
+.csv
+.pdf
 tareas/poisson/colab_dataset_A281.R
 tareas/poisson/colab_dataset_A281.ipynb
 tareas/poisson/decisiones_dataset.Rmd
@@ -18,7 +21,7 @@ tareas/poisson/Claude outputs/
 
 
 # Large raw data
-tareas/poisson/datos_egresos
+tareas/poisson/datos_egresos/
 tareas/poisson/datos_poblacion
 tareas/poisson/figure
 tareas/poisson/DICCIONARIO CODIGOS SP_24_V1.1.xlsm
