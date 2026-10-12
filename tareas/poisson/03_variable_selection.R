@@ -24,3 +24,38 @@ head(datos_comuna)
 length(unique(datos_region$poblacion[datos_region$anio == "2011"]))
 length(unique(datos_comuna$comuna))
 length(unique(datos_comuna$comuna_cod))
+
+# AIC selection
+
+modelo_pois <- glm(
+  casos ~ sexo + edad + zona + region + periodo + pandemia + anio,
+  offset = log(poblacion),
+  family = poisson,
+  data = datos_region
+)
+
+modelo_completo <- glm(
+  casos ~ region + periodo + pandemia + anio + sexo + edad + zona,
+  offset = log(poblacion),
+  family = poisson,
+  data = datos_region
+)
+
+modelo_nulo <- glm(
+  casos ~ 1,
+  offset = log(poblacion),
+  family = poisson,
+  data = datos_region
+)
+
+modelo_backward <- step(modelo_completo, direction = "backward")
+# modelo_forward <- step(modelo_nulo, scope = alcance, direction = "forward")
+
+# edad + region + periodo + anio
+# region + periodo + anio + edad
+
+summary(modelo_backward)
+
+class(datos_region$anio)
+class(datos_region$periodo)
+

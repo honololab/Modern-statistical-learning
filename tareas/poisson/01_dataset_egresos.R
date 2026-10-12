@@ -45,13 +45,18 @@ ZONAS <- c("15" = "Norte", "01" = "Norte", "02" = "Norte", "03" = "Norte",
            "11" = "Sur", "12" = "Sur")
 EDADES   <- c("0-9", "10-19", "20+")
 SEXOS    <- c("HOMBRE", "MUJER")
-PERIODOS <- c("2010-2019", "2020-2021", "2022-2024")
+# 2020 y 2021 van por separado: en 2020 cayeron los egresos por todas las causas
+# (menor acceso hospitalario) y 2021 concentra el alza de casos (y un cambio de
+# formato en la fuente). Ver decisiones_dataset.Rmd.
+PERIODOS <- c("2010-2019", "2020", "2021", "2022-2024")
 
 periodo <- function(anio) {
-  factor(ifelse(anio <= 2019, PERIODOS[1], ifelse(anio <= 2021, PERIODOS[2], PERIODOS[3])),
+  factor(ifelse(anio <= 2019, PERIODOS[1],
+         ifelse(anio == 2020, PERIODOS[2],
+         ifelse(anio == 2021, PERIODOS[3], PERIODOS[4]))),
          levels = PERIODOS)
 }
-# Mismo período como código: 1 = prepandemia, 2 = pandemia, 3 = pospandemia.
+# Mismo período como código: 1 = prepandemia, 2 = 2020, 3 = 2021, 4 = pospandemia.
 # En el modelo usar factor(pandemia), no como número.
 pandemia <- function(anio) as.integer(periodo(anio))
 
