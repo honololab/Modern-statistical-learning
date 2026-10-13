@@ -161,9 +161,7 @@ cbind(perfiles[c("sexo", "edad", "region_austral", "periodo")],
       li = exp(pred$fit - 1.96 * pred$se.fit),
       ls = exp(pred$fit + 1.96 * pred$se.fit))
 
-# Observado vs. predicho por M2 para el mismo perfil, por período.
-# casos_esp suma los conteos esperados de las filas del perfil (con su poblacion real).
-# p_poisson: prueba exacta de que los casos observados vienen de una Poisson(casos_esp).
+# real vs. predicho por M2 para el mismo perfil, por período.
 obs_perfil <- subset(datos, sexo == "MUJER" & edad == "0-9" & region_austral == "Metropolitana")
 obs_perfil$casos_esp <- predict(m2, newdata = obs_perfil, type = "response")
 agg <- aggregate(cbind(casos, casos_esp, poblacion) ~ periodo, data = obs_perfil, FUN = sum)
@@ -185,16 +183,30 @@ tabla_perfil[num] <- round(tabla_perfil[num], 3)
 tabla_perfil
 
 # Mismo perfil, error de cada modelo (filas región-sexo-edad-año del perfil)
-sapply(list(M1 = m1, M2 = m2, M3 = m3, M4 = m4), function(m) {
+sapply(list(M1 = m1, M2 = m2, M3 = m3), function(m) {
   e <- predict(m, newdata = obs_perfil, type = "response")
   c(ECM = mean((obs_perfil$casos - e)^2), O_E_total = sum(obs_perfil$casos) / sum(e))
 })
 
+# Observado vs. esperado por edad x período (suma sobre sexo y región).
+oe_edad_periodo <- function(m) {
+  d <- datos
+  d$casos_esp <- fitted(m)                      # conteo esperado de cada celda (incluye el offset)
+  agg <- aggregate(cbind(casos, casos_esp, poblacion) ~ edad + periodo, data = d, FUN = sum)
+  agg$tasa_obs  <- 1e5 * agg$casos / agg$poblacion
+  agg$tasa_esp  <- 1e5 * agg$casos_esp / agg$poblacion
+  agg$O_E       <- agg$casos / agg$casos_esp
+  agg$p_poisson <- mapply(function(o, e) poisson.test(o, r = e)$p.value, agg$casos, agg$casos_esp)
+  agg$poblacion <- NULL
+  agg <- agg[order(agg$edad, agg$periodo), ]
+  rownames(agg) <- NULL
+  num <- sapply(agg, is.double)
+  agg[num] <- round(agg[num], 3)
+  agg
+}
+oe_m2 <- oe_edad_periodo(m2)
+oe_m2
 
-
-# sensitivity m2
-datos$t <- datos$anio - 2010
-m2_trend <- update(m2, . ~ . + t);                  anova(m2, m2_trend, test = "Chisq")
-m2_anio  <- update(m2, . ~ . - periodo + factor(anio)); anova(m2, m2_anio, test = "Chisq"); BIC(m2, m2_anio)
-m2_qp    <- update(m2, family = quasipoisson);      summary(m2_qp)$dispersion
-m2_nb    <- MASS::glm.nb(casos ~ sexo * edad + region_austral + periodo + offset(log(poblacion)), data = datos)
+# Mismo cálculo con M3: al incluir edad:periodo, O/E = 1 en cada combinación
+oe_m3 <- oe_edad_periodo(m3)
+oe_m3[, c("edad", "periodo", "casos", "casos_esp", "O_E")]
