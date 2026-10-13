@@ -15,7 +15,7 @@ head(datos)
 
 # categorías de referencia
 datos$sexo    <- relevel(datos$sexo,    ref = "HOMBRE")
-datos$edad    <- relevel(datos$edad,    ref = "20+")
+datos$edad    <- relevel(datos$edad,    ref = "0-9")
 datos$zona    <- relevel(datos$zona,    ref = "Metropolitana")
 datos$periodo <- relevel(datos$periodo, ref = "2010-2019")
 datos$region  <- relevel(datos$region,  ref = "Metropolitana")
@@ -40,7 +40,7 @@ summary(modelo_pois1)
 # Modelo 2: depende el sexo de la edad? 
 # añadimos la interacción entre sexo y edad.
 modelo_pois2 <- glm(
-  casos ~ sexo * edad + region_austral + periodo,
+  casos ~ sexo + edad + sexo * edad + region_austral + periodo,
   offset = log(poblacion),
   family = poisson,
   data = datos
@@ -50,23 +50,13 @@ summary(modelo_pois2)
 
 # Modelo 3: la pandemia afectó a cada rango de edad de forma separada?
 modelo_pois3 <- glm(
-  casos ~ sexo + edad * periodo + region_austral,
+  casos ~ sexo + edad + periodo + edad * periodo + region_austral,
   offset = log(poblacion),
   family = poisson,
   data = datos
 )
 
 summary(modelo_pois3)
-
-# Modelo 4: interacción sexo:edad y periodo:edad juntas
-modelo_pois4 <- glm(
-  casos ~ sexo * edad + edad * periodo + region_austral,
-  offset = log(poblacion),
-  family = poisson,
-  data = datos
-)
-
-summary(modelo_pois4)
 
 # años
 modelo_pois2_3 <- glm(
@@ -80,11 +70,12 @@ modelo_pois2_3 <- glm(
 
 summary(modelo_pois1) # sexo + edad + region_austral + periodo
 irr1 <- exp(cbind(IRR = coef(modelo_pois1), confint(modelo_pois1)))
-round(irr1, 2)
-irr1[c("periodo2020", "periodo2021"), ]
+round(irr1, 5)
+irr1[c("periodo2020", "periodo2021", "periodo2022-2024"), ]
 irr1["sexoMUJER", ]
+irr1[c("edad10-19", "edad20+"), ]
 
-summary(modelo_pois2) # sexo * edad + region_austral + periodo (reference group: hombre 20+ años)
+summary(modelo_pois2) # sexo + edad + sexo * edad + region_austral + periodo (reference group: hombre 20+ años)
 # cambio grupo de referencia (hombre)
 irr2 <- exp(cbind(IRR = coef(modelo_pois2), confint(modelo_pois2)))
 round(irr2, 2)
@@ -94,28 +85,27 @@ irr_sexo_por_edad <- t(sapply(levels(datos$edad), function(ref_edad) {
   m <- update(modelo_pois2, data = d)
   exp(c(IRR = unname(coef(m)["sexoMUJER"]), confint(m)["sexoMUJER", ]))
 }))
-round(irr_sexo_por_edad, 2)
+round(irr_sexo_por_edad, 5)
+irr2[c("periodo2020", "periodo2021", "periodo2022-2024"), ]
+irr2[grep("^region_austral", rownames(irr2)), ] # reference group (Metropolitana)
 
 summary(modelo_pois3) # casos ~ sexo + edad * periodo + region_austral
 irr3 <- exp(cbind(IRR = coef(modelo_pois3), confint(modelo_pois3)))
 round(irr3, 2)
-coefs_periodo <- c("periodo2020", "periodo2021", "periodo2022-2024")
-# reference group (2010 - 2019)
-irr_periodo_por_edad <- t(sapply(levels(datos$edad), function(ref_edad) {
+# reference group (20+ años), dentro de cada periodo
+coefs_edad <- c("edad10-19", "edad20+")
+irr_edad_por_periodo <- t(sapply(levels(datos$periodo), function(ref_periodo) {
   d <- datos
-  d$edad <- relevel(d$edad, ref = ref_edad)
+  d$periodo <- relevel(d$periodo, ref = ref_periodo)
   m <- update(modelo_pois3, data = d)
-  ic <- confint(m, parm = coefs_periodo)
-  res <- exp(cbind(IRR = coef(m)[coefs_periodo], IC_inf = ic[, 1], IC_sup = ic[, 2]))
+  ic <- confint(m, parm = coefs_edad)
+  res <- exp(cbind(IRR = coef(m)[coefs_edad], IC_inf = ic[, 1], IC_sup = ic[, 2]))
   setNames(as.vector(t(res)),
-           paste(rep(sub("^periodo", "", coefs_periodo), each = 3),
+           paste(rep(sub("^edad", "", coefs_edad), each = 3),
                  colnames(res), sep = "_"))
 }))
-round(irr_periodo_por_edad, 2)
+round(irr_edad_por_periodo, 5)
 
-summary(modelo_pois4) # casos ~ sexo * edad + edad * periodo + region_austral
-irr4 <- exp(cbind(IRR = coef(modelo_pois4), confint(modelo_pois4)))
-round(irr4, 2)
 
 modelos <- list(
   M1                = modelo_pois1,
@@ -123,9 +113,9 @@ modelos <- list(
   M2                = modelo_pois2,
   # M2_2         = modelo_pois2_2,
   # M2_3 = modelo_poi2_3,
-  M3                = modelo_pois3,
+  M3                = modelo_pois3
   # M3_2         = modelo_pois3_2,
-  M4 = modelo_pois4
+  # M4 = modelo_pois4
   # M4_2 = modelo_pois4_2
 )
 
@@ -147,24 +137,22 @@ tabla_comparacion[order(tabla_comparacion$ECM), ] # M2, M1, M4, M3
 m1 <- modelo_pois1   # efectos principales
 m2 <- modelo_pois2   # + sexo:edad
 m3 <- modelo_pois3   # + edad:periodo
-m4 <- modelo_pois4 # sexo:edad + edad:periodo
+# m4 <- modelo_pois4 # sexo:edad + edad:periodo
 
 ## Pruebas de razón de verosimilitud (modelos anidados)
-####### porqué esto y no AIC?
 # If H0 is true, the big model only gains a little by fitting noise, so LR is small.
 # If H0 is false, the big model captures real structure, so LR is large.
 
 anova(m1, m2, test = "Chisq") # rechaza H0
-anova(m3, m4, test = "Chisq")  # rechaza H0
+# anova(m3, m4, test = "Chisq")  # rechaza H0
 anova(m1, m3, test = "Chisq")  # no rechaza H0
-anova(m2, m4, test = "Chisq")  # no rechaza H0
+# anova(m2, m4, test = "Chisq")  # no rechaza H0
+AIC(m2, m3)
 
 drop1(m2, test = "Chisq")
 drop1(m3, test = "Chisq")
 
 ## Predicción
-# Con poblacion = 100.000, el conteo esperado es directamente la tasa por 100.000.
-# El IC se calcula en escala log y luego se exponencia.
 perfiles <- data.frame(sexo = "MUJER", edad = "0-9", region_austral = "Metropolitana",
                        periodo = levels(datos$periodo), poblacion = 1e5)
 pred <- predict(m2, newdata = perfiles, type = "link", se.fit = TRUE)
