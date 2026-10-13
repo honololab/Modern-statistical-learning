@@ -60,7 +60,7 @@ summary(modelo_pois3)
 
 # años
 modelo_pois2_3 <- glm(
-  casos ~ sexo * edad + region_austral + periodo + anio,
+  casos ~ sexo + edad + sexo * edad + region_austral + periodo + anio,
   offset = log(poblacion),
   family = poisson,
   data = datos
@@ -75,7 +75,7 @@ irr1[c("periodo2020", "periodo2021", "periodo2022-2024"), ]
 irr1["sexoMUJER", ]
 irr1[c("edad10-19", "edad20+"), ]
 
-summary(modelo_pois2) # sexo + edad + sexo * edad + region_austral + periodo (reference group: hombre 20+ años)
+summary(modelo_pois2) # sexo + edad + sexo * edad + region_austral + periodo (referencia: hombre, 0-9 años)
 # cambio grupo de referencia (hombre)
 irr2 <- exp(cbind(IRR = coef(modelo_pois2), confint(modelo_pois2)))
 round(irr2, 2)
@@ -120,7 +120,7 @@ modelos <- list(
 )
 
 
-## Tabla AIC, devianza residual / gl, ECM y Pearson / gl (control de sobredispersión).
+## Tabla aic ecm devianza/gl
 tabla_comparacion <- data.frame(
   parametros = sapply(modelos, function(m) m$rank),
   AIC        = sapply(modelos, AIC),
@@ -152,7 +152,7 @@ AIC(m2, m3)
 drop1(m2, test = "Chisq")
 drop1(m3, test = "Chisq")
 
-## Predicción
+## Tasas esperadas
 perfiles <- data.frame(sexo = "MUJER", edad = "0-9", region_austral = "Metropolitana",
                        periodo = levels(datos$periodo), poblacion = 1e5)
 pred <- predict(m2, newdata = perfiles, type = "link", se.fit = TRUE)
@@ -161,7 +161,7 @@ cbind(perfiles[c("sexo", "edad", "region_austral", "periodo")],
       li = exp(pred$fit - 1.96 * pred$se.fit),
       ls = exp(pred$fit + 1.96 * pred$se.fit))
 
-# real vs. predicho por M2 para el mismo perfil, por período.
+# real vs. esperada por M2 para el mismo perfil, por período.
 obs_perfil <- subset(datos, sexo == "MUJER" & edad == "0-9" & region_austral == "Metropolitana")
 obs_perfil$casos_esp <- predict(m2, newdata = obs_perfil, type = "response")
 agg <- aggregate(cbind(casos, casos_esp, poblacion) ~ periodo, data = obs_perfil, FUN = sum)
@@ -210,3 +210,115 @@ oe_m2
 # Mismo cálculo con M3: al incluir edad:periodo, O/E = 1 en cada combinación
 oe_m3 <- oe_edad_periodo(m3)
 oe_m3[, c("edad", "periodo", "casos", "casos_esp", "O_E")]
+
+
+## Validación cruzada y predicción fuera de muestra
+
+m0 <- glm(casos ~ 1, offset = log(poblacion), family = poisson, data = datos) # referencia: solo la tasa global
+modelos_cv <- list(M0 = m0, M1 = m1, M2 = m2, M3 = m3)
+
+# Devianza Poisson
+dev_pois <- function(y, mu) 2 * sum(ifelse(y > 0, y * log(y / mu), 0) - (y - mu))
+
+# Folds agrupados por celda región x sexo x edad: cada celda sale completa (todos sus años),
+# así la serie de una celda no se usa para predecirse a sí misma. Se estratifica por
+# region_austral para que ninguna región quede fuera del entrenamiento.
+celdas <- unique(datos[c("region", "region_austral", "sexo", "edad")])
+id_celda <- match(interaction(datos$region, datos$sexo, datos$edad),
+                  interaction(celdas$region, celdas$sexo, celdas$edad))
+
+cv_poisson <- function(K = 5, R = 20, seed = 2026) {
+  set.seed(seed)
+  res <- replicate(R, {
+    fold_celda <- ave(seq_len(nrow(celdas)), celdas$region_austral,
+                      FUN = function(i) sample(rep_len(1:K, length(i))))
+    fold <- fold_celda[id_celda]
+    sapply(modelos_cv, function(m) {
+      mu <- numeric(nrow(datos))
+      for (k in 1:K) {
+        test <- fold == k
+        m_k <- update(m, data = datos[!test, ])
+        mu[test] <- predict(m_k, newdata = datos[test, ], type = "response")
+      }
+      c(dev = dev_pois(datos$casos, mu) / nrow(datos),
+        ECM = mean((datos$casos - mu)^2))
+    })
+  }, simplify = "array")                     # métrica x modelo x repetición
+  list(media = apply(res, 1:2, mean), de = apply(res, 1:2, sd))
+}
+cv <- cv_poisson()
+round(cv$media, 4)   # menor es mejor
+round(cv$de, 4)      # variabilidad entre repeticiones
+mejor <- names(which.min(cv$media["dev", ]))
+mejor
+
+# Predicción hacia adelante: entrenar con 2010-2023 y predecir 2024.
+train <- subset(datos, anio <  2024)
+test  <- subset(datos, anio == 2024)
+modelos_train <- lapply(modelos_cv, update, data = train)
+
+sapply(modelos_train, function(m) {
+  mu <- predict(m, newdata = test, type = "response")
+  c(dev = dev_pois(test$casos, mu) / nrow(test), ECM = mean((test$casos - mu)^2),
+    casos_obs = sum(test$casos), casos_pred = sum(mu))
+})
+
+sim_pred <- function(m, newdata, nsim = 5000) {
+  B   <- MASS::mvrnorm(nsim, coef(m), vcov(m))
+  X   <- model.matrix(delete.response(terms(m)), newdata, xlev = m$xlevels)
+  mu  <- exp(X %*% t(B) + log(newdata$poblacion))
+  matrix(rpois(length(mu), mu), nrow = nrow(mu))
+}
+
+set.seed(2026)
+m_pred <- modelos_train[[mejor]]
+sims   <- sim_pred(m_pred, test)
+
+# Casos 2024 por grupo: predicción puntual, intervalo de predicción 95% y observado
+pred_por <- function(grupo) {
+  g <- test[[grupo]]
+  do.call(rbind, lapply(levels(droplevels(g)), function(nv) {
+    s <- colSums(sims[g == nv, , drop = FALSE])
+    data.frame(grupo = nv,
+               casos_obs  = sum(test$casos[g == nv]),
+               casos_pred = round(sum(predict(m_pred, newdata = test[g == nv, ], type = "response")), 2),
+               li = unname(quantile(s, 0.025)), ls = unname(quantile(s, 0.975)))
+  }))
+}
+pred_edad   <- pred_por("edad");           pred_edad
+pred_sexo   <- pred_por("sexo");           pred_sexo
+pred_region <- pred_por("region_austral"); pred_region
+
+# Cobertura: proporción de grupos cuyo conteo observado cae dentro del intervalo 95%
+cobertura <- function(p) mean(p$casos_obs >= p$li & p$casos_obs <= p$ls)
+c(edad = cobertura(pred_edad), sexo = cobertura(pred_sexo), region = cobertura(pred_region))
+
+## Tasa predicha 2024 para un perfil
+pred_perfil_2024 <- function(sx, ed, reg) {
+  i   <- which(test$sexo == sx & test$edad == ed & test$region_austral == reg)
+  s   <- colSums(sims[i, , drop = FALSE])
+  pob <- sum(test$poblacion[i])
+  mu  <- sum(predict(m_pred, newdata = test[i, ], type = "response"))
+  data.frame(casos_obs = sum(test$casos[i]), casos_pred = mu,
+             li = quantile(s, .025), ls = quantile(s, .975),
+             tasa_obs = 1e5 * sum(test$casos[i]) / pob, tasa_pred = 1e5 * mu / pob,
+             tasa_li = 1e5 * quantile(s, .025) / pob, tasa_ls = 1e5 * quantile(s, .975) / pob)
+}
+pred_perfil_2024("MUJER", "0-9", "Metropolitana") #por 100.000
+pred_perfil_2024("MUJER", "0-9", "La Araucanía")
+
+subset(test, sexo == "MUJER" & edad == "0-9" & region_austral == "Metropolitana",
+       select = c(anio, casos, poblacion))
+p <- aggregate(cbind(casos, poblacion) ~ periodo,
+               data = subset(datos, sexo == "MUJER" & edad == "0-9" & region_austral == "Metropolitana"),
+               FUN = sum)
+p$tasa_100mil <- 1e5 * p$casos / p$poblacion
+p
+
+subset(test, sexo == "MUJER" & edad == "0-9" & region_austral == "La Araucanía",
+       select = c(anio, casos, poblacion))
+p <- aggregate(cbind(casos, poblacion) ~ periodo,
+               data = subset(datos, sexo == "MUJER" & edad == "0-9" & region_austral == "La Araucanía"),
+               FUN = sum)
+p$tasa_100mil <- 1e5 * p$casos / p$poblacion
+p
